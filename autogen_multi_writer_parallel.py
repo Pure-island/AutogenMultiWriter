@@ -146,8 +146,8 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
 
 async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, max_iter=MAX_SECTION_ITER) -> str:
 
-    writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_dpskv3_1)
-    reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_kimik2)
+    writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
+    reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
 
     prompt = f"请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
     res = await writer_agent.run(task=prompt)
@@ -199,8 +199,8 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     results = [p for p in completed if p]
 
     # 关闭 model client（释放资源）
-    await llm_client_dpskv3_1.close()
-    await llm_client_dpskv3_1.close()
+    await llm_client_writer.close()
+    await llm_client_viewer.close()
 
     print(f"全部任务完成，共保存 {len(results)} 个小节。")
     return results
