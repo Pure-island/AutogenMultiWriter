@@ -53,6 +53,8 @@ llm_client_writer = OpenAIChatCompletionClient(
         "json_output": False,
         "family": "unknown",
         "structured_output": True,
+        "thinking_budget": 25536,
+        "max_tokens": 160000 - 25536
     },
     )
 llm_client_viewer = OpenAIChatCompletionClient(
@@ -65,42 +67,68 @@ llm_client_viewer = OpenAIChatCompletionClient(
         "json_output": False,
         "family": "unknown",
         "structured_output": True,
+        "thinking_budget": 25536,
+        "max_tokens": 160000 - 25536
     },
     )
 
 
 # system prompts（可按需微调）
-toc_sys = (
-    "你是目录生成专家。接收主题和目标读者后，返回一个分章分节的目录。"
+toc_sys = (    
+    "你是专业的教材大纲与课程设计专家。"
+    "你是教材大纲与章节内容设计专家。接收主题和目标读者后，返回一个分章分节的目录。"
     "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话概述\"} ] } ]\n}"
     "不要返回额外说明文本。不需要```json等标记。"
     "根据内容的复杂度，生成 3 ~ 15 章，每章 2 ~ 10 节。"
     "标题应当简明且具有概括性\n"
     "小节描述需准确反映核心内容\n"
+    "重点是相关的知识覆盖要全面且有深度、成体系\n"
+    "对于给定的主题，请生成一个清晰、逻辑合理且面向目标读者的目录。"
+    "你可以对涉及的主题进行适当扩展或细化，确保内容的专业性和准确性、覆盖全面、知识成体系。"
 )
 
 writer_sys = (
     "你是技术写作机器人。给定 {chapter_title} 和 {section_title}，输出该小节的完整正文（Markdown 格式）。"
-    "正文约 2000 ~ 10000 字，必要时包含代码块或示例。只返回 Markdown 文本。"
+    "正文约 5000 ~ 50000 字，必要时包含代码块或示例。只返回 Markdown 文本。"
     "你是技术写作机器人（Writer Agent）。你会收到下列变量：{chapter_title}、{section_title}、{section_desc}、{audience}。"
     "任务：为该小节产出清晰、面向目标读者的 Markdown 正文。"
     "格式约束："
     " 1) 以一行 10-25 字的 TL;DR 开始（加粗或斜体）。"
     " 2) 正文应包含若干段落、必要时用小标题 (## 或 ###)、步骤列表或代码块。"
-    " 3) 正文约 2000 ~ 10000 字（可根据节复杂度调整），应尽量详实。"
+    " 3) 正文约 5000 ~ 50000 字（可根据节复杂度调整），应尽量详实。"
     " 4) 结尾处可添加一个“进一步阅读”小节（可选）。"
-    " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$E=mc^2$，块级公式：$$E=mc^2$$，代码块：```python\nprint('hello world')\n```"
+    " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$ E=mc^2 $，块级公式：$$\nE=mc^2\n$$，代码块：```python\nprint('hello world')\n```"
     " 6) 对于图片，可以插入来自网络的相关图片，使用Markdown语法插入，例如：![描述](图片URL)。如wikipedia等权威网站的图片优先。"
     "必须严格只返回 Markdown 内容（无元信息、无多余解释）。"
+    "重点："
+    " 1) 逻辑连贯性：是否按教学进度由浅入深。\n"
+    " 2) 完整性：是否覆盖理论、实践、案例、扩展。\n"
+    " 3) 学习友好性：是否有引导性问题、总结、提示。\n"
+    " 4) 技术正确性：代码、公式、术语是否正确。\n"
+    " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
 )
 
 reviewer_sys = (
-    "你是严格的编辑/改进者。输入会指定 'type': 'toc' 或 'content'。\n"
-    "- 若 type=='toc'，返回 JSON: { 'type':'toc', 'issues': [...] }\n"
-    "- 若 type=='content'，返回 JSON: { 'type':'content', 'issues': [...] }\n"
-    "请严格只返回 JSON。不需要额外说明文本。不需要```json等标记。"
-    "检查重点（但不限于）：逻辑连贯性、面向读者的深度/广度、先决知识遗漏、概念错误、重复内容、可读性与格式、代码示例正确性（如有）。"
-    "对于content，还要检查是否符合 Markdown 语法规范，如公式，图片，表格，代码块等。例子：内联公式：$E=mc^2$，块级公式：$$E=mc^2$$，代码块：```python\nprint('hello world')\n```"
+    "你是教材审稿专家（Reviewer Agent），负责严格编辑和改进。"
+    "输入会包含 'type': 'toc' 或 'content'。"
+    "输出格式：必须为 JSON。"
+    "若 type=='toc'：返回 { 'type':'toc', 'issues': [...] }\n"
+    "若 type=='content'：返回 { 'type':'content', 'issues': [...] }\n"
+    "每个 issue 对象包含：\n"
+    "  - 'severity': 'critical' | 'major' | 'minor'\n"
+    "  - 'location': '章节/节名 或 行号'\n"
+    "  - 'message': 问题简述\n"
+    "  - 'explanation': 为什么是问题（1–3句）\n"
+    "  - 'suggestion': 具体修改方案\n"
+    "  - 'example_fix': 可选，修订后的示例片段\n"
+    "对于 content，还需附加字段：'markdown_ok': true|false\n"
+    "检查重点：\n"
+    " 1) 逻辑连贯性：是否按教学进度由浅入深。\n"
+    " 2) 完整性：是否覆盖理论、实践、案例、扩展。\n"
+    " 3) 学习友好性：是否有引导性问题、总结、提示。\n"
+    " 4) 技术正确性：代码、公式、术语是否正确。\n"
+    " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
+    "禁止返回额外说明文本，仅返回 JSON。"
 )
 
 # 创建 agents（构造函数可能因版本差异需要调整）
@@ -130,7 +158,7 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
 
     # reviewer 迭代改进（异步顺序进行）
     for i in range(max_iter):
-        review_input = json.dumps({"type":"toc", "toc": toc, "audience": audience}, ensure_ascii=False)
+        review_input = json.dumps({"type":"toc", "toc": toc, "audience": audience, "topic": topic}, ensure_ascii=False)
         r = await toc_reviewer_agent.run(task=review_input)
         raw_r = _extract_text_from_task_result(r)
         try:
@@ -147,12 +175,12 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
     return toc
 
 
-async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, max_iter=MAX_SECTION_ITER) -> str:
+async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
 
     writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
     reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
 
-    prompt = f"请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
+    prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
     res = await writer_agent.run(task=prompt)
     content = _extract_text_from_task_result(res)
 
@@ -174,6 +202,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
 
 async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCURRENCY) -> List[str]:
     toc = await generate_initial_toc(topic, audience)
+    print(json.dumps(toc, ensure_ascii=False, indent=2))
     chapters = toc.get("chapters", [])
 
     # 构建所有待写小节的任务元数据
@@ -188,7 +217,7 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     async def worker(ci:int, si:int, chapter_title:str, section_title:str):
         async with semaphore:
             try:
-                md = await generate_and_improve_section(chapter_title, section_title, audience)
+                md = await generate_and_improve_section(chapter_title, section_title, audience, topic, toc)
                 path = save_section_md(ci, si, chapter_title, section_title, md)
                 print(f"Saved: {path}")
                 return path
