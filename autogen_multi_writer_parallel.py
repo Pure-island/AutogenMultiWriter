@@ -152,6 +152,15 @@ def _extract_text_from_task_result(result) -> str:
 
 
 async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER) -> Dict:
+    # Check if TOC already exists
+    toc_filename = f"toc_{slugify(topic)}.json"
+    toc_path = OUT_DIR / toc_filename
+    
+    if toc_path.exists():
+        print(f"Loading existing TOC from {toc_path}")
+        with open(toc_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    
     prompt = f"请为主题 `{topic}`（面向 `{audience}`）生成整篇教程目录，注意分章节并列出小节。"
     result = await toc_agent.run(task=prompt)
     raw = _extract_text_from_task_result(result)
@@ -175,6 +184,11 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
             toc = json.loads(_extract_text_from_task_result(improved))
         except Exception:
             break
+
+    # Save TOC to file
+    with open(toc_path, 'w', encoding='utf-8') as f:
+        json.dump(toc, f, ensure_ascii=False, indent=2)
+    print(f"TOC saved to {toc_path}")
 
     return toc
 
