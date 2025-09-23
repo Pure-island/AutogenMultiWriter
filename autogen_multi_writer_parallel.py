@@ -6,11 +6,15 @@
 # 并设置环境变量（或在下面直接填入）例如：OPENAI_API_KEY
 
 import asyncio
+from asyncio.log import logger
 import json
 import os
 import re
 import pathlib
 from typing import Dict, List, Tuple
+import time
+import random
+import logging
 
 # AutoGen v0.4 imports
 from autogen_agentchat.agents import AssistantAgent
@@ -128,7 +132,7 @@ reviewer_sys = (
     " 3) 学习友好性：是否有引导性问题、总结、提示。\n"
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
-    "禁止返回额外说明文本，仅返回 JSON。"
+    "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
 )
 
 # 创建 agents（构造函数可能因版本差异需要调整）
@@ -176,27 +180,79 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
 
 
 async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
-
     writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
     reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
 
-    prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
-    res = await writer_agent.run(task=prompt)
-    content = _extract_text_from_task_result(res)
+    # Add retry logic for initial writing
+    content = None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
+            res = await writer_agent.run(task=prompt)
+            content = _extract_text_from_task_result(res)
+            if content:
+                break
+        except Exception as e:
+            logger.error(f"Attempt {attempt+1} failed for initial writing of {chapter_title} - {section_title}: {e}")
+            if attempt < max_retries - 1:
+                # Exponential backoff with jitter
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                await asyncio.sleep(wait_time)
+            else:
+                # If all retries failed, use placeholder content
+                content = f"# {section_title}\n\n内容生成失败，请稍后重试。"
+                print(f"All attempts failed for initial writing of {chapter_title} - {section_title}")
+
+    if not content:
+        content = f"# {section_title}\n\n内容生成失败，请稍后重试。"
 
     for i in range(max_iter):
         review_input = json.dumps({"type": "content", "chapter": chapter_title, "section": section_title, "content": content, "audience": audience}, ensure_ascii=False)
-        rv = await reviewer_agent.run(task=review_input)
+        
+        # Add retry logic for review
+        rv = None
+        for attempt in range(max_retries):
+            try:
+                rv = await reviewer_agent.run(task=review_input)
+                if rv:
+                    break
+            except Exception as e:
+                print(f"Attempt {attempt+1} failed for review of {chapter_title} - {section_title}: {e}")
+                if attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(wait_time)
+        
+        if not rv:
+            break  # Skip improvement if review failed
+            
         raw_r = _extract_text_from_task_result(rv)
         try:
             robj = json.loads(raw_r)
         except Exception:
             break
-        # 将 reviewer 建议交给 writer 进一步改进（这里把建议直接当作新的 task）
+            
+        # Add retry logic for improvement
         improve_prompt = "请根据以下建议，返回最终正文（Markdown）:\n" + json.dumps(robj, ensure_ascii=False)
-        res2 = await writer_agent.run(task=improve_prompt)
-        content = _extract_text_from_task_result(res2)
-
+        improvement_success = False
+        for attempt in range(max_retries):
+            try:
+                res2 = await writer_agent.run(task=improve_prompt)
+                content = _extract_text_from_task_result(res2)
+                improvement_success = True
+                break
+            except Exception as e:
+                logger.error(f"Attempt {attempt+1} failed for improvement of {chapter_title} - {section_title}: {e}")
+                if attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    await asyncio.sleep(wait_time)
+        
+        if not improvement_success:
+            # If improvement failed, keep the previous content
+            logger.error(f"All attempts failed for improvement of {chapter_title} - {section_title}, keeping previous content")
+            
     return content
 
 
