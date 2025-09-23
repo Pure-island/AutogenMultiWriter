@@ -237,14 +237,34 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     print(f"全部任务完成，共保存 {len(results)} 个小节。")
     return results
 
-
 # ---------- CLI 入口 ----------
 if __name__ == '__main__':
     import argparse
     p = argparse.ArgumentParser(description="AutoGen v0.4 异步并行多 agent 写作流水线")
-    p.add_argument("--topic", required=False, default="如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）")
+    p.add_argument("--topic", required=False, default="如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）", 
+                   help="Direct topic string or path to a .txt file containing the topic")
     p.add_argument("--audience", required=False, default="熟悉 Python 的工程师")
     p.add_argument("--concurrency", type=int, default=CONCURRENCY)
     args = p.parse_args()
+    
+    # Check if topic is a file path and read content if it is
+    topic = args.topic
+    if topic.endswith('.txt') and os.path.isfile(topic):
+        with open(topic, 'r', encoding='utf-8') as f:
+            topic = f.read().strip()
+        print(f"Read topic from file: {topic}")
+    else:
+        print(f"Using direct topic: {topic}")
 
-    asyncio.run(run_pipeline_v0_4(args.topic, args.audience, concurrency=args.concurrency))
+    asyncio.run(run_pipeline_v0_4(topic, args.audience, concurrency=args.concurrency))
+
+# # ---------- CLI 入口 ----------
+# if __name__ == '__main__':
+#     import argparse
+#     p = argparse.ArgumentParser(description="AutoGen v0.4 异步并行多 agent 写作流水线")
+#     p.add_argument("--topic", required=False, default="如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）")
+#     p.add_argument("--audience", required=False, default="熟悉 Python 的工程师")
+#     p.add_argument("--concurrency", type=int, default=CONCURRENCY)
+#     args = p.parse_args()
+
+#     asyncio.run(run_pipeline_v0_4(args.topic, args.audience, concurrency=args.concurrency))
