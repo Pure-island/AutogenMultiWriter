@@ -153,7 +153,7 @@ def _extract_text_from_task_result(result) -> str:
 
 async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER) -> Dict:
     # Check if TOC already exists
-    toc_filename = f"toc_{slugify(topic)}.json"
+    toc_filename = f"00_toc_{slugify(topic)}.json"
     toc_path = OUT_DIR / toc_filename
     
     if toc_path.exists():
@@ -194,6 +194,23 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
 
 
 async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
+    # Check if section file already exists
+    existing_files = list(OUT_DIR.glob(f"*_{slugify(chapter_title)}_{slugify(section_title)}.md"))
+    
+    if existing_files:
+        print(f"Loading existing section from {existing_files[0]}")
+        with open(existing_files[0], 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Extract only the content part (after the title and section headers)
+            lines = content.split('\n')
+            content_start = 0
+            for i, line in enumerate(lines):
+                if line.startswith('# ') or line.startswith('## '):
+                    content_start = i + 1
+                else:
+                    break
+            return '\n'.join(lines[content_start:]) if content_start < len(lines) else content
+
     writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
     reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
 
