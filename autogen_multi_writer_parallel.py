@@ -211,6 +211,16 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
                     break
             return '\n'.join(lines[content_start:]) if content_start < len(lines) else content
 
+    # Find section description from TOC
+    section_desc = ""
+    for chapter in toc.get("chapters", []):
+        if chapter.get("title") == chapter_title:
+            for section in chapter.get("sections", []):
+                if section.get("title") == section_title:
+                    section_desc = section.get("desc", "")
+                    break
+            break
+
     writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
     reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
 
@@ -219,7 +229,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。"
+            prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。小节描述：{section_desc}"
             res = await writer_agent.run(task=prompt)
             content = _extract_text_from_task_result(res)
             if content:
@@ -239,7 +249,14 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         content = f"# {section_title}\n\n内容生成失败，请稍后重试。"
 
     for i in range(max_iter):
-        review_input = json.dumps({"type": "content", "chapter": chapter_title, "section": section_title, "content": content, "audience": audience}, ensure_ascii=False)
+        review_input = json.dumps({
+            "type": "content", 
+            "chapter": chapter_title, 
+            "section": section_title, 
+            "section_desc": section_desc,  # 新增
+            "content": content, 
+            "audience": audience
+        }, ensure_ascii=False)
         
         # Add retry logic for review
         rv = None
@@ -264,8 +281,8 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         except Exception:
             break
             
-        # Add retry logic for improvement
-        improve_prompt = "请根据以下建议，返回最终正文（Markdown）:\n" + json.dumps(robj, ensure_ascii=False)
+        # 修改: 在improve阶段也加入section_desc
+        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：{json.dumps(robj, ensure_ascii=False)}"
         improvement_success = False
         for attempt in range(max_retries):
             try:
