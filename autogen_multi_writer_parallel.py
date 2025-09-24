@@ -26,7 +26,7 @@ OUT_DIR = pathlib.Path(__file__).parent / "output_async"
 OUT_DIR.mkdir(exist_ok=True)
 MAX_TOC_ITER = 3
 MAX_SECTION_ITER = 3
-CONCURRENCY = 32  # 并行工作者数量（根据机器/速率限制调整）
+CONCURRENCY = 16  # 并行工作者数量（根据机器/速率限制调整）
 
 # ---------- 工具函数 ----------
 
@@ -238,7 +238,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
             logger.error(f"Attempt {attempt+1} failed for initial writing of {chapter_title} - {section_title}: {e}")
             if attempt < max_retries - 1:
                 # Exponential backoff with jitter
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                wait_time = (20 ** attempt) + random.uniform(0, 1)
                 await asyncio.sleep(wait_time)
             else:
                 # If all retries failed, use placeholder content
@@ -269,7 +269,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
                 print(f"Attempt {attempt+1} failed for review of {chapter_title} - {section_title}: {e}")
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
-                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    wait_time = (20 ** attempt) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
         
         if not rv:
@@ -294,7 +294,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
                 logger.error(f"Attempt {attempt+1} failed for improvement of {chapter_title} - {section_title}: {e}")
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
-                    wait_time = (2 ** attempt) + random.uniform(0, 1)
+                    wait_time = (20 ** attempt) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
         
         if not improvement_success:
