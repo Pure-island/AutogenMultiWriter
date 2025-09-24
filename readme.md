@@ -74,7 +74,7 @@ AutoGen 大模型教程/书籍写作
 
 ## 基本用法
 
-    python autogen_multi_writer_v0_4_async.py --topic "你的主题" --audience "目标读者"
+    python autogen_multi_writer_parallel.py --topic "你的主题" --audience "目标读者"
 
 ### 参数说明
 
@@ -87,10 +87,10 @@ AutoGen 大模型教程/书籍写作
 ### 示例
 
     # 生成关于机器学习的教程
-    python autogen_multi_writer_v0_4_async.py --topic "机器学习入门" --audience "初学者"
+    python autogen_multi_writer_parallel.py --topic "机器学习入门" --audience "初学者"
     
     # 使用更高的并发度
-    python autogen_multi_writer_v0_4_async.py --topic "Python高级编程" --audience "有经验的开发者" --concurrency 16
+    python autogen_multi_writer_parallel.py --topic "Python高级编程" --audience "有经验的开发者" --concurrency 16
 
 ## 高级使用示例
 
@@ -99,19 +99,19 @@ AutoGen 大模型教程/书籍写作
 可以将复杂主题写入文本文件，然后传递给脚本：
 
     echo "深入理解深度学习中的注意力机制及其在自然语言处理中的应用" > topic.txt
-    python autogen_multi_writer_v0_4_async.py --topic topic.txt --audience "AI研究人员"
+    python autogen_multi_writer_parallel.py --topic topic.txt --audience "AI研究人员"
 
 ### 调整并发数量
 
 根据你的系统性能和API限制调整并发数：
 
-    python autogen_multi_writer_v0_4_async.py --topic "Web开发最佳实践" --audience "前端工程师" --concurrency 8
+    python autogen_multi_writer_parallel.py --topic "Web开发最佳实践" --audience "前端工程师" --concurrency 8
 
 ### 断点续写功能
 
 脚本会自动保存已生成的内容，如果中断后重新运行相同主题，会自动跳过已存在的章节：
 
-    python autogen_multi_writer_v0_4_async.py --topic "数据科学实战指南" --audience "数据分析师"
+    python autogen_multi_writer_parallel.py --topic "数据科学实战指南" --audience "数据分析师"
 
 ## 输出文件格式
 
