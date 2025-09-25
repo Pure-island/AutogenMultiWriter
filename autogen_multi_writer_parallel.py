@@ -201,15 +201,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         print(f"Loading existing section from {existing_files[0]}")
         with open(existing_files[0], 'r', encoding='utf-8') as f:
             content = f.read()
-            # Extract only the content part (after the title and section headers)
-            lines = content.split('\n')
-            content_start = 0
-            for i, line in enumerate(lines):
-                if line.startswith('# ') or line.startswith('## '):
-                    content_start = i + 1
-                else:
-                    break
-            return '\n'.join(lines[content_start:]) if content_start < len(lines) else content
+            return content
 
     # Find section description from TOC
     section_desc = ""
@@ -251,9 +243,11 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
     for i in range(max_iter):
         review_input = json.dumps({
             "type": "content", 
+            "toc": toc, 
+            "topic": topic,
             "chapter": chapter_title, 
             "section": section_title, 
-            "section_desc": section_desc,  # 新增
+            "section_desc": section_desc, 
             "content": content, 
             "audience": audience
         }, ensure_ascii=False)
