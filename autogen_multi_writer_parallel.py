@@ -26,20 +26,25 @@ OUT_DIR = pathlib.Path(__file__).parent / "output_async"
 OUT_DIR.mkdir(exist_ok=True)
 MAX_TOC_ITER = 3
 MAX_SECTION_ITER = 3
-CONCURRENCY = 16  # 并行工作者数量（根据机器/速率限制调整）
+CONCURRENCY = 8  # 并行工作者数量（根据机器/速率限制调整）
 
 # ---------- 工具函数 ----------
 
 def slugify(s: str) -> str:
     s = s.lower()
-    s = re.sub(r"[^\w\s-]", "", s)
+    # s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[^\w\s+-]", "", s)
     s = re.sub(r"\s+", "-", s).strip("-")
     return s[:120]
 
 
 def save_section_md(chapter_idx:int, section_idx:int, chapter_title:str, section_title:str, content_md:str) -> str:
+    # Create chapter directory
+    chapter_dir = OUT_DIR / f"{chapter_idx:02d}_{slugify(chapter_title)}"
+    chapter_dir.mkdir(exist_ok=True)
+    
     filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(chapter_title)}_{slugify(section_title)}.md"
-    path = OUT_DIR / filename
+    path = chapter_dir / filename
     # 同步写入（文件小，影响可忽略）。如需严格异步可改用 aiofiles。
     with open(path, "w", encoding="utf-8") as f:
         f.write(f"# {chapter_title}\n\n## {section_title}\n\n")
@@ -81,9 +86,9 @@ llm_client_viewer = OpenAIChatCompletionClient(
 toc_sys = (    
     "你是专业的教材大纲与课程设计专家。"
     "你是教材大纲与章节内容设计专家。接收主题和目标读者后，返回一个分章分节的目录。"
-    "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话概述\"} ] } ]\n}"
+    "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话详述本节内容\"} ] } ]\n}"
     "不要返回额外说明文本。不需要```json等标记。"
-    "根据内容的复杂度，生成 3 ~ 15 章，每章 2 ~ 10 节。"
+    "根据内容的复杂度，生成 3 ~ 20 章，每章 2 ~ 20 节。可酌情修改章节数量。"
     "标题应当简明且具有概括性\n"
     "小节描述需准确反映核心内容\n"
     "重点是相关的知识覆盖要全面且有深度、成体系\n"
@@ -95,14 +100,14 @@ toc_sys = (
 writer_sys = (
     "你是技术写作机器人。给定 {chapter_title} 和 {section_title}，输出该小节的完整正文（Markdown 格式）。"
     "正文约 5000 ~ 50000 字，必要时包含代码块或示例。只返回 Markdown 文本。"
-    "你是技术写作机器人（Writer Agent）。你会收到下列变量：{chapter_title}、{section_title}、{section_desc}、{audience}。"
+    "你是技术写作机器人（Writer Agent）。你会收到下列变量：{chapter_title}、{section_title}、{section_desc}、{audience}、{toc}、{topic}。"
     "任务：为该小节产出清晰、面向目标读者的 Markdown 正文。"
     "格式约束："
     " 1) 以一行 10-25 字的 TL;DR 开始（加粗或斜体）。"
     " 2) 正文应包含若干段落、必要时用小标题 (## 或 ###)、步骤列表或代码块。"
     " 3) 正文约 5000 ~ 50000 字（可根据节复杂度调整），应尽量详实。"
     " 4) 结尾处可添加一个“进一步阅读”小节（可选）。"
-    " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$ E=mc^2 $，块级公式：$$\nE=mc^2\n$$，代码块：```python\nprint('hello world')\n```"
+    " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$E=mc^2$，块级公式：$$\nE=mc^2\n$$，代码块：```python\nprint('hello world')\n```"
     " 6) 对于图片，可以插入来自网络的相关图片，使用Markdown语法插入，例如：![描述](图片URL)。如wikipedia等权威网站的图片优先。"
     "必须严格只返回 Markdown 内容（无元信息、无多余解释）。"
     "重点："
@@ -111,13 +116,14 @@ writer_sys = (
     " 3) 学习友好性：是否有引导性问题、总结、提示。\n"
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
+    " 6) 本节涉及到的内容，如果在前面章节没有提到过，请务必解释清楚。\n"
     "注意：现在生成结果可能出现“极”字符污染，输出token可能被随机替换为“极”，请注意纠正。"
 )
 
 reviewer_sys = (
     "你是教材审稿专家（Reviewer Agent），负责严格编辑和改进。"
     "输入会包含 'type': 'toc' 或 'content'。"
-    "输出格式：必须为 JSON。"
+    "输出格式：必须为 JSON。不需要```json等标记。"
     "若 type=='toc'：返回 { 'type':'toc', 'issues': [...] }\n"
     "若 type=='content'：返回 { 'type':'content', 'issues': [...] }\n"
     "每个 issue 对象包含：\n"
@@ -134,13 +140,22 @@ reviewer_sys = (
     " 3) 学习友好性：是否有引导性问题、总结、提示。\n"
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
+    " 6) 知识覆盖面：是否包含所有应有的知识点。\n"
     "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
     "注意：现在生成结果可能出现“极”字符污染，输出token可能被随机替换为“极”，请注意纠正。"
+)
+json_sys = (
+    "你是json格式整理机器人（json format Agent），负责严格整理json格式。"
+    "你的输入是一段json格式文本。其格式可能存在错误。"
+    "你的任务是整理成规范的 JSON 格式并返回。"
+    "注意：现在输入可能出现“极”字符污染，token可能被随机替换为“极”，请注意纠正。"
+    "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
 )
 
 # 创建 agents（构造函数可能因版本差异需要调整）
 toc_agent = AssistantAgent(name="toc_agent", system_message=toc_sys, model_client=llm_client_writer)
 toc_reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
+json_format_agent = AssistantAgent(name="json_agent", system_message=json_sys, model_client=llm_client_viewer)
 
 # ---------- v0.4 风格的异步辅助函数 ----------
 
@@ -158,7 +173,7 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
     # Check if TOC already exists
     toc_filename = f"00_toc_{slugify(topic)}.json"
     toc_path = OUT_DIR / toc_filename
-    
+    print(f"TOC path: {toc_path}")
     if toc_path.exists():
         print(f"Loading existing TOC from {toc_path}")
         with open(toc_path, 'r', encoding='utf-8') as f:
@@ -167,26 +182,21 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
     prompt = f"请为主题 `{topic}`（面向 `{audience}`）生成整篇教程目录，注意分章节并列出小节。"
     result = await toc_agent.run(task=prompt)
     raw = _extract_text_from_task_result(result)
-    try:
-        toc = json.loads(raw)
-    except Exception as e:
-        raise ValueError(f"解析 TOC JSON 失败: {e}\n原始返回:\n{raw}")
 
     # reviewer 迭代改进（异步顺序进行）
     for i in range(max_iter):
-        review_input = json.dumps({"type":"toc", "toc": toc, "audience": audience, "topic": topic}, ensure_ascii=False)
+        review_input = json.dumps({"type":"toc", "toc": raw, "audience": audience, "topic": (topic if i==0 else "同上次")}, ensure_ascii=False)
         r = await toc_reviewer_agent.run(task=review_input)
         raw_r = _extract_text_from_task_result(r)
-        try:
-            robj = json.loads(raw_r)
-        except Exception:
-            break
-        improve_prompt = "请根据以下建议，返回最终 TOC（JSON）:\n" + json.dumps(robj, ensure_ascii=False)
+        improve_prompt = "请根据以下建议，返回最终 TOC（JSON）:\n" + json.dumps(raw_r, ensure_ascii=False)
         improved = await toc_agent.run(task=improve_prompt)
-        try:
-            toc = json.loads(_extract_text_from_task_result(improved))
-        except Exception:
-            break
+        raw = _extract_text_from_task_result(improved)
+    
+    improved = await json_format_agent.run(task=raw)
+    try:
+        toc = json.loads(_extract_text_from_task_result(improved))
+    except Exception as e:
+        raise ValueError(f"解析 TOC JSON 失败: {e}\n原始返回:\n{improved}")
 
     # Save TOC to file
     with open(toc_path, 'w', encoding='utf-8') as f:
@@ -241,7 +251,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
             logger.error(f"Attempt {attempt+1} failed for initial writing of {chapter_title} - {section_title}: {e}")
             if attempt < max_retries - 1:
                 # Exponential backoff with jitter
-                wait_time = (20 ** attempt) + random.uniform(0, 1)
+                wait_time = (20 ** (attempt + 1)) + random.uniform(0, 1)
                 await asyncio.sleep(wait_time)
             else:
                 # If all retries failed, use placeholder content
@@ -255,7 +265,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         review_input = json.dumps({
             "type": "content", 
             "toc": toc, 
-            "topic": topic,
+            "topic": topic if i==0 else "同上次",
             "chapter": chapter_title, 
             "section": section_title, 
             "section_desc": section_desc, 
@@ -265,9 +275,11 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         
         # Add retry logic for review
         rv = None
+        robj = None
         for attempt in range(max_retries):
             try:
                 rv = await reviewer_agent.run(task=review_input)
+                raw_r = _extract_text_from_task_result(rv)
                 if rv:
                     break
             except Exception as e:
@@ -279,15 +291,8 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
         
         if not rv:
             break  # Skip improvement if review failed
-            
-        raw_r = _extract_text_from_task_result(rv)
-        try:
-            robj = json.loads(raw_r)
-        except Exception:
-            break
-            
         # 修改: 在improve阶段也加入section_desc
-        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：{json.dumps(robj, ensure_ascii=False)}"
+        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：{raw_r}"
         improvement_success = False
         for attempt in range(max_retries):
             try:
