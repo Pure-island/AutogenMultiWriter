@@ -24,8 +24,8 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 # OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 OUT_DIR = pathlib.Path(__file__).parent / "output_async"
 OUT_DIR.mkdir(exist_ok=True)
-MAX_TOC_ITER = 3
-MAX_SECTION_ITER = 3
+MAX_TOC_ITER = 2
+MAX_SECTION_ITER = 2
 CONCURRENCY = 8  # 并行工作者数量（根据机器/速率限制调整）
 
 # ---------- 工具函数 ----------
@@ -150,6 +150,7 @@ json_sys = (
     "你的任务是整理成规范的 JSON 格式并返回。"
     "注意：现在输入可能出现“极”字符污染，token可能被随机替换为“极”，请注意纠正。"
     "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
+    "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话详述本节内容\"} ] } ]\n}"
 )
 
 # 创建 agents（构造函数可能因版本差异需要调整）
@@ -206,9 +207,9 @@ async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER)
     return toc
 
 
-async def generate_and_improve_section(chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
+async def generate_and_improve_section(chapter_idx: int, chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
     # Check if section file already exists
-    existing_files = list(OUT_DIR.glob(f"*_{slugify(chapter_title)}_{slugify(section_title)}.md"))
+    existing_files = list((OUT_DIR / f"{chapter_idx:02d}_{slugify(chapter_title)}").glob(f"*_{slugify(chapter_title)}_{slugify(section_title)}.md"))
     
     if existing_files:
         print(f"Loading existing section from {existing_files[0]}")
@@ -239,7 +240,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
 
     # Add retry logic for initial writing
     content = None
-    max_retries = 3
+    max_retries = 99
     for attempt in range(max_retries):
         try:
             prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。小节描述：{section_desc}"
@@ -251,7 +252,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
             logger.error(f"Attempt {attempt+1} failed for initial writing of {chapter_title} - {section_title}: {e}")
             if attempt < max_retries - 1:
                 # Exponential backoff with jitter
-                wait_time = (20 ** (attempt + 1)) + random.uniform(0, 1)
+                wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
                 await asyncio.sleep(wait_time)
             else:
                 # If all retries failed, use placeholder content
@@ -286,7 +287,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
                 print(f"Attempt {attempt+1} failed for review of {chapter_title} - {section_title}: {e}")
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
-                    wait_time = (20 ** attempt) + random.uniform(0, 1)
+                    wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
         
         if not rv:
@@ -304,7 +305,7 @@ async def generate_and_improve_section(chapter_title: str, section_title: str, a
                 logger.error(f"Attempt {attempt+1} failed for improvement of {chapter_title} - {section_title}: {e}")
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
-                    wait_time = (20 ** attempt) + random.uniform(0, 1)
+                    wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
         
         if not improvement_success:
@@ -331,7 +332,7 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     async def worker(ci:int, si:int, chapter_title:str, section_title:str):
         async with semaphore:
             try:
-                md = await generate_and_improve_section(chapter_title, section_title, audience, topic, toc)
+                md = await generate_and_improve_section(ci, chapter_title, section_title, audience, topic, toc)
                 path = save_section_md(ci, si, chapter_title, section_title, md)
                 print(f"Saved: {path}")
                 return path
