@@ -319,7 +319,8 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     toc = await generate_initial_toc(topic, audience)
     print(json.dumps(toc, ensure_ascii=False, indent=2))
     chapters = toc.get("chapters", [])
-
+    input("请按回车键继续...")
+    
     # 构建所有待写小节的任务元数据
     tasks_meta: List[Tuple[int,int,str,str]] = []
     for ci, ch in enumerate(chapters, start=1):
