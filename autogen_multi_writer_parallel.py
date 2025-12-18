@@ -108,7 +108,7 @@ writer_sys = (
     " 3) 正文约 5000 ~ 50000 字（可根据节复杂度调整），应尽量详实。"
     " 4) 结尾处可添加一个“进一步阅读”小节（可选）。"
     " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$E=mc^2$，块级公式：$$\nE=mc^2\n$$，代码块：```python\nprint('hello world')\n```"
-    " 6) 对于图片，可以插入来自网络的相关图片，使用Markdown语法插入，例如：![描述](图片URL)。因为无法生成图片，所以URL可以留空，后续再补充。"
+    " 6) 对于图片，可以插入来自网络的相关图片，使用Markdown语法插入，例如：![描述](图片URL)。如wikipedia等权威网站的图片优先。"
     "必须严格只返回 Markdown 内容（无元信息、无多余解释）。"
     "重点："
     " 1) 逻辑连贯性：是否按教学进度由浅入深。\n"
@@ -117,7 +117,6 @@ writer_sys = (
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
     " 6) 本节涉及到的内容，如果在前面章节没有提到过，请务必解释清楚。\n"
-    " 7) 有详细的说明、公式推导、知识讲解。"
     "注意：现在生成结果可能出现“极”字符污染，输出token可能被随机替换为“极”，请注意纠正。"
 )
 
@@ -142,9 +141,6 @@ reviewer_sys = (
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
     " 6) 知识覆盖面：是否包含所有应有的知识点。\n"
-    " 7) 本节涉及到的内容，如果在前面章节没有提到过，请务必解释清楚。\n"
-    " 8) 图片留空是因为大模型无法生成图片，所以图片URL可以留空，后续再补充。"
-    " 9) 有详细的说明、公式推导、知识讲解。"
     "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
     "注意：现在生成结果可能出现“极”字符污染，输出token可能被随机替换为“极”，请注意纠正。"
 )
@@ -297,7 +293,7 @@ async def generate_and_improve_section(chapter_idx: int, chapter_title: str, sec
         if not rv:
             break  # Skip improvement if review failed
         # 修改: 在improve阶段也加入section_desc
-        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：来自内容审阅后的建议{raw_r}"
+        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：{raw_r}"
         improvement_success = False
         for attempt in range(max_retries):
             try:
