@@ -107,7 +107,7 @@ writer_sys = (
     " 2) 正文应包含若干段落、必要时用小标题 (## 或 ###)、步骤列表或代码块。"
     " 3) 正文约 5000 ~ 50000 字（可根据节复杂度调整），应尽量详实。"
     " 4) 结尾处可添加一个“进一步阅读”小节（可选）。"
-    " 5) 保证markdown渲染的可读性，如公式，图片，表格，代码块等。例子：内联公式：$E=mc^2$，块级公式：$$\nE=mc^2\n$$，代码块：```python\nprint('hello world')\n```"
+    " 5) 保证代码、公式、图片、表格等的可读性。例子：内联公式：$ E=mc^2 $，块级公式：$$\nE=mc^2\n$$，代码块：``python\nprint('hello world')\n```"
     " 6) 对于图片，可以插入来自网络的相关图片，使用Markdown语法插入，例如：![描述](图片URL)。因为无法生成图片，所以URL可以留空，后续再补充。"
     "必须严格只返回 Markdown 内容（无元信息、无多余解释）。"
     "重点："
@@ -117,6 +117,7 @@ writer_sys = (
     " 4) 技术正确性：代码、公式、术语是否正确。\n"
     " 5) 格式合规性：Markdown 是否规范，可否直接渲染。\n"
     " 6) 本节涉及到的内容，如果在前面章节没有提到过，请务必解释清楚。\n"
+    " 7) 若存在公式，公式原理是否解释清楚，公式参数是否有详细描述解释。"
     "注意：现在生成结果可能出现“极”字符污染，输出token可能被随机替换为“极”，请注意纠正。"
 )
 
@@ -361,7 +362,13 @@ if __name__ == '__main__':
                    help="Direct topic string or path to a .txt file containing the topic")
     p.add_argument("--audience", required=False, default="熟悉 Python 的工程师")
     p.add_argument("--concurrency", type=int, default=CONCURRENCY)
+    p.add_argument("--max-toc-iter", type=int, default=2, help="Maximum iterations for TOC generation")
+    p.add_argument("--max-section-iter", type=int, default=1, help="Maximum iterations for section generation")
     args = p.parse_args()
+    
+    # Set global variables based on arguments
+    MAX_TOC_ITER = args.max_toc_iter
+    MAX_SECTION_ITER = args.max_section_iter
     
     # Check if topic is a file path and read content if it is
     topic = args.topic

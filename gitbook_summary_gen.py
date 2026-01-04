@@ -55,7 +55,7 @@ def generate_gitbook_files(json_path: Path):
     
     # 生成主README.md
     readme_content = f"# {catalog['title']}\n\n"
-    readme_content += "本书详细介绍了Unity游戏开发中的网络技术，涵盖从基础概念到高级实现的全面内容。\n\n"
+    readme_content += "\n\n"
     readme_content += "## 目录结构\n\n"
     
     for chapter_idx, chapter in enumerate(catalog['chapters'], 1):
