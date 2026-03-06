@@ -1,129 +1,111 @@
-AutoGen 大模型教程/书籍写作
-===================
+# AutoGen 多智能体并行写作流水线
 
-概述
---
+基于 AutoGen v0.4 异步 API 的教程/书籍生成脚本。通过「目录规划 + 章节写作 + 内容评审」三类智能体协作，自动生成结构化 Markdown 文档，并支持并发写作与中断续写。
 
-一个基于 AutoGen v0.4 异步 API 的多智能体写作流水线脚本，使用多个 AI 智能体协作生成结构化技术文档，包括生成目录、撰写章节内容以及进行内容评审优化。
+## 功能概览
 
-## 功能特点
+- 异步并行生成：使用 `asyncio` 并发处理多个小节
+- 多智能体协作：TOC Agent 生成目录，Writer Agent 写正文，Reviewer Agent 给改进建议
+- 迭代改进：小节支持评审后再生成，提升可读性与完整度
+- 断点续写：目录与章节文件落盘后可复用，避免重复生成
+- 重试机制：调用模型时带重试，降低临时失败影响
+- 主题输入灵活：支持直接传 `--topic` 字符串或 `.txt` 文件
 
-----
+## 环境要求
 
-* **异步并行处理**​：使用 asyncio 实现高效并行处理，可同时生成多个章节内容
+- Python 3.9+
+- 依赖安装：
 
-* **多智能体协作**​：使用三个专门的智能体分别负责目录生成、内容撰写和内容评审
+```bash
+pip install -U "autogen-agentchat" "autogen-ext[openai]"
+```
 
-* **迭代改进机制**​：每个生成的内容都会经过评审和改进循环，确保质量
+## 配置说明
 
-* **断点续写功能**​：自动生成的目录和章节内容会保存到文件，避免重复生成
+脚本默认通过 SiliconFlow 兼容 OpenAI 接口调用模型（`https://api.siliconflow.cn/v1`）。
 
-* **重试机制**​：在内容生成和评审过程中加入重试逻辑，提高稳定性
+建议将 API Key 放到环境变量中，不要硬编码在脚本里。
 
-* **支持从文件读取主题**​：可以指定文本文件作为输入主题
+PowerShell:
 
-环境要求
-----
+```powershell
+$env:SILICONFLOW_API_KEY="你的API密钥"
+```
 
-### Python 版本
+macOS/Linux:
 
-* Python 3.7+
+```bash
+export SILICONFLOW_API_KEY="你的API密钥"
+```
 
-### 依赖包
+然后在代码中读取：
 
-运行前请安装以下依赖：
-    pip install -U "autogen-agentchat" "autogen-ext[openai]"
+```python
+api_key = os.environ.get("SILICONFLOW_API_KEY")
+```
 
-配置说明
-----
+当前默认模型（以代码为准）：
 
-### API 密钥设置
+- Writer: `deepseek-ai/DeepSeek-V3.2`
+- Reviewer: `deepseek-ai/DeepSeek-V3.2`
 
-脚本默认使用 [SiliconFlow 平台](https://api.siliconflow.cn/v1)提供的模型服务，可按需求更改url使用其他平台的服务。
+## 快速开始
 
-需要设置 API 密钥：
+```bash
+python autogen_multi_writer_parallel.py --topic "你的主题" --audience "目标读者"
+```
 
-1. 直接在脚本中修改(45~70行)：
-   
-   ```python
-         llm_client_writer = OpenAIChatCompletionClient(
-   
-          model='deepseek-ai/DeepSeek-V3.1', 
-          api_key='你的API密钥', 
-          # ...
-   
-          )
-   ```
+### 常用参数
 
-2. 推荐使用环境变量方式（更安全）：
-      export SILICONFLOW_API_KEY="你的API密钥"
-   然后在脚本中使用：
-      api_key=os.environ.get("SILICONFLOW_API_KEY")
-
-### 模型配置
-
-脚本默认使用以下模型：
-
-* 目录生成和内容撰写：DeepSeek-V3.1
-
-* 内容评审：Kimi-K2-Instruct
-
-如需更换模型，请修改相应的 `OpenAIChatCompletionClient`配置。
-
-----
-
-## 基本用法
-
-    python autogen_multi_writer_parallel.py --topic "你的主题" --audience "目标读者"
-
-### 参数说明
-
-* `--topic`: 文章主题（默认："如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）"）
-
-* `--audience`: 目标读者（默认："熟悉 Python 的工程师"）
-
-* `--concurrency`: 并行工作者数量（默认：32，根据机器性能和 API 限制调整）
+- `--topic`：写作主题，或 `.txt` 文件路径
+- `--audience`：目标读者
+- `--concurrency`：并发 worker 数（默认 8）
+- `--max-toc-iter`：目录迭代次数（默认 2）
+- `--max-section-iter`：小节迭代次数（默认 1）
+- `--notes`：对整篇内容的补充要求（会影响目录与写作）
 
 ### 示例
 
-    # 生成关于机器学习的教程
-    python autogen_multi_writer_parallel.py --topic "机器学习入门" --audience "初学者"
-    
-    # 使用更高的并发度
-    python autogen_multi_writer_parallel.py --topic "Python高级编程" --audience "有经验的开发者" --concurrency 64
+```bash
+# 直接指定主题
+python autogen_multi_writer_parallel.py \
+  --topic "机器学习入门" \
+  --audience "初学者"
 
-## 高级使用示例
+# 从文件读取主题
+python autogen_multi_writer_parallel.py \
+  --topic topic.txt \
+  --audience "AI 研究人员"
 
-### 从文件读取主题
+# 控制并发与迭代
+python autogen_multi_writer_parallel.py \
+  --topic "Python 高级编程" \
+  --audience "有经验的开发者" \
+  --concurrency 4 \
+  --max-toc-iter 3 \
+  --max-section-iter 2 \
+  --notes "强调工程实践与性能优化"
+```
 
-可以将复杂主题写入文本文件，然后传递给脚本：
+## 输出结构
 
-    echo "深入理解深度学习中的注意力机制及其在自然语言处理中的应用" > topic.txt
-    python autogen_multi_writer_parallel.py --topic topic.txt --audience "AI研究人员"
+生成结果默认写入 `output_async/`：
 
-### 调整并发数量
+- `00_toc_{topic_slug}.json`：目录 JSON
+- `{chapter_idx}_{chapter_slug}/{chapter_idx}_{section_idx}_{section_slug}.md`：章节小节 Markdown
 
-根据你的系统性能和API限制调整并发数：
+示例：
 
-    python autogen_multi_writer_parallel.py --topic "Web开发最佳实践" --audience "前端工程师" --concurrency 8
+```text
+output_async/
+  00_toc_机器学习入门.json
+  01_基础概念/
+    01_01_什么是机器学习.md
+    01_02_监督学习与无监督学习.md
+```
 
-### 断点续写功能
+## 注意事项
 
-脚本会自动保存已生成的内容，如果中断后重新运行相同主题，会自动跳过已存在的章节：
-
-    python autogen_multi_writer_parallel.py --topic "数据科学实战指南" --audience "数据分析师"
-
-## 输出文件格式
-
-脚本运行后，生成的内容将保存在 `output_async` 目录中：
-
-### 目录文件
-    00_toc_{主题slug}.json - 教程目录结构
-
-### 章节文件
-    {章节编号}_{小节编号}_{章节标题slug}_{小节标题slug}.md
-
-例如：
-    01_02_introduction_what-is-autogen.md
-
-### 文件结构示例
+- 模型调用成本与并发度、章节数量、迭代次数强相关
+- 并发建议从小值开始，观察 API 限流和稳定性后再提高
+- 若中断后重跑同一主题，可复用已生成文件，减少重复开销
