@@ -1,2 +1,5 @@
 # 忽略 output_async 文件夹及其所有内容
 output_async/
+
+# 本地密钥配置
+.env

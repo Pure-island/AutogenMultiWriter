@@ -38,6 +38,14 @@ macOS/Linux:
 export SILICONFLOW_API_KEY="你的API密钥"
 ```
 
+也可以在项目根目录创建 `.env` 文件（脚本启动时会自动读取）：
+
+```dotenv
+SILICONFLOW_API_KEY=你的API密钥
+```
+
+仓库提供了 `.env.example` 作为模板，请复制后改名为 `.env` 并填入自己的 key。
+
 然后在代码中读取：
 
 ```python
