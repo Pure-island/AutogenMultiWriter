@@ -11,7 +11,7 @@ import json
 import os
 import re
 import pathlib
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 import time
 import random
 import logging
@@ -25,10 +25,11 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 OUT_DIR = pathlib.Path(__file__).parent / "output_async"
 OUT_DIR.mkdir(exist_ok=True)
 MAX_TOC_ITER = 2
-MAX_SECTION_ITER = 2
+MAX_SECTION_ITER = 1
 CONCURRENCY = 8  # 并行工作者数量（根据机器/速率限制调整）
 
 # ---------- 工具函数 ----------
+
 
 def slugify(s: str) -> str:
     s = s.lower()
@@ -38,12 +39,19 @@ def slugify(s: str) -> str:
     return s[:120]
 
 
-def save_section_md(chapter_idx:int, section_idx:int, chapter_title:str, section_title:str, content_md:str) -> str:
+def save_section_md(
+    chapter_idx: int,
+    section_idx: int,
+    chapter_title: str,
+    section_title: str,
+    content_md: str,
+) -> str:
     # Create chapter directory
     chapter_dir = OUT_DIR / f"{chapter_idx:02d}_{slugify(chapter_title)}"
     chapter_dir.mkdir(exist_ok=True)
-    
-    filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(chapter_title)}_{slugify(section_title)}.md"
+
+    filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(section_title)}.md"
+    # filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(chapter_title)}_{slugify(section_title)}.md"
     path = chapter_dir / filename
     # 同步写入（文件小，影响可忽略）。如需严格异步可改用 aiofiles。
     with open(path, "w", encoding="utf-8") as f:
@@ -51,42 +59,50 @@ def save_section_md(chapter_idx:int, section_idx:int, chapter_title:str, section
         f.write(content_md)
     return str(path)
 
+
 # ---------- 创建模型客户端与 agents ----------
+
 llm_client_writer = OpenAIChatCompletionClient(
-    model='deepseek-ai/DeepSeek-V3.1', 
-    api_key='xxx', 
-    base_url='https://api.siliconflow.cn/v1',
-    model_info={
-        "vision": False,
-        "function_calling": False,
-        "json_output": False,
-        "family": "unknown",
-        "structured_output": True,
-        "thinking_budget": 25536,
-        "max_tokens": 160000 - 25536
-    },
-    )
+    model="deepseek-ai/DeepSeek-V3.2",
+    api_key=os.environ.get("SILICONFLOW_API_KEY", ""),
+    base_url="https://api.siliconflow.cn/v1",
+    model_info=cast(
+        Any,
+        {
+            "vision": False,
+            "function_calling": False,
+            "json_output": False,
+            "family": "unknown",
+            "structured_output": True,
+            "thinking_budget": 25536,
+            "max_tokens": 160000 - 25536,
+        },
+    ),
+)
 llm_client_viewer = OpenAIChatCompletionClient(
-    model='moonshotai/Kimi-K2-Instruct-0905', 
-    api_key='xxx', 
-    base_url='https://api.siliconflow.cn/v1',
-    model_info={
-        "vision": False,
-        "function_calling": False,
-        "json_output": False,
-        "family": "unknown",
-        "structured_output": True,
-        "thinking_budget": 25536,
-        "max_tokens": 160000 - 25536
-    },
-    )
+    model="deepseek-ai/DeepSeek-V3.2",
+    api_key=os.environ.get("SILICONFLOW_API_KEY", ""),
+    base_url="https://api.siliconflow.cn/v1",
+    model_info=cast(
+        Any,
+        {
+            "vision": False,
+            "function_calling": False,
+            "json_output": False,
+            "family": "unknown",
+            "structured_output": True,
+            "thinking_budget": 25536,
+            "max_tokens": 160000 - 25536,
+        },
+    ),
+)
 
 
 # system prompts（可按需微调）
-toc_sys = (    
+toc_sys = (
     "你是专业的教材大纲与课程设计专家。"
     "你是教材大纲与章节内容设计专家。接收主题和目标读者后，返回一个分章分节的目录。"
-    "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话详述本节内容\"} ] } ]\n}"
+    '必须返回严格 JSON，格式如下：{\n  "title": "<整篇标题>",\n  "chapters": [ {"title":"..", "sections": [ {"title":"..", "desc":"一句话详述本节内容"} ] } ]\n}'
     "不要返回额外说明文本。不需要```json等标记。"
     "根据内容的复杂度，生成 3 ~ 20 章，每章 2 ~ 20 节。可酌情修改章节数量。"
     "标题应当简明且具有概括性\n"
@@ -151,15 +167,22 @@ json_sys = (
     "你的任务是整理成规范的 JSON 格式并返回。"
     "注意：现在输入可能出现“极”字符污染，token可能被随机替换为“极”，请注意纠正。"
     "禁止返回额外说明文本，仅返回 JSON。不需要```json等标记。"
-    "必须返回严格 JSON，格式如下：{\n  \"title\": \"<整篇标题>\",\n  \"chapters\": [ {\"title\":\"..\", \"sections\": [ {\"title\":\"..\", \"desc\":\"一句话详述本节内容\"} ] } ]\n}"
+    '必须返回严格 JSON，格式如下：{\n  "title": "<整篇标题>",\n  "chapters": [ {"title":"..", "sections": [ {"title":"..", "desc":"一句话详述本节内容"} ] } ]\n}'
 )
 
 # 创建 agents（构造函数可能因版本差异需要调整）
-toc_agent = AssistantAgent(name="toc_agent", system_message=toc_sys, model_client=llm_client_writer)
-toc_reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
-json_format_agent = AssistantAgent(name="json_agent", system_message=json_sys, model_client=llm_client_viewer)
+toc_agent = AssistantAgent(
+    name="toc_agent", system_message=toc_sys, model_client=llm_client_writer
+)
+toc_reviewer_agent = AssistantAgent(
+    name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer
+)
+json_format_agent = AssistantAgent(
+    name="json_agent", system_message=json_sys, model_client=llm_client_viewer
+)
 
 # ---------- v0.4 风格的异步辅助函数 ----------
+
 
 def _extract_text_from_task_result(result) -> str:
     """从 TaskResult 中取最后一个文本消息的内容，兼容 v0.4 返回结构。"""
@@ -171,60 +194,252 @@ def _extract_text_from_task_result(result) -> str:
     return ""
 
 
-async def generate_initial_toc(topic: str, audience: str, max_iter=MAX_TOC_ITER) -> Dict:
+def _toc_path_for_topic(topic: str) -> pathlib.Path:
+    return OUT_DIR / f"00_toc_{slugify(topic)}.json"
+
+
+def _validate_toc_structure(toc: Dict) -> None:
+    if not isinstance(toc, dict):
+        raise ValueError("TOC 必须是 JSON 对象")
+    if "title" not in toc or "chapters" not in toc:
+        raise ValueError("TOC 缺少必要字段: title 或 chapters")
+    if not isinstance(toc["chapters"], list):
+        raise ValueError("TOC 字段 chapters 必须是数组")
+
+    for idx, chapter in enumerate(toc["chapters"], start=1):
+        if not isinstance(chapter, dict):
+            raise ValueError(f"第 {idx} 章不是对象")
+        if "title" not in chapter or "sections" not in chapter:
+            raise ValueError(f"第 {idx} 章缺少 title 或 sections")
+        if not isinstance(chapter["sections"], list):
+            raise ValueError(f"第 {idx} 章的 sections 必须是数组")
+
+
+def _save_toc_to_file(toc: Dict, topic: str) -> pathlib.Path:
+    toc_path = _toc_path_for_topic(topic)
+    with open(toc_path, "w", encoding="utf-8") as f:
+        json.dump(toc, f, ensure_ascii=False, indent=2)
+    print(f"TOC saved to {toc_path}")
+    return toc_path
+
+
+def _print_toc(toc: Dict) -> None:
+    print("\n========== 当前目录 ==========")
+    print(f"标题: {toc.get('title', '')}")
+    chapters = toc.get("chapters", [])
+    for ci, ch in enumerate(chapters, start=1):
+        chapter_title = ch.get("title", "")
+        print(f"{ci:02d}. {chapter_title}")
+        for si, sec in enumerate(ch.get("sections", []), start=1):
+            section_title = sec.get("title", "")
+            section_desc = sec.get("desc", "")
+            if section_desc:
+                print(f"    {ci:02d}.{si:02d} {section_title} - {section_desc}")
+            else:
+                print(f"    {ci:02d}.{si:02d} {section_title}")
+    print("==============================\n")
+
+
+def _print_generation_brief(topic: str, audience: str, planning_notes: str) -> None:
+    print("\n========== 写作需求确认 ==========")
+    print(f"主题: {topic}")
+    print(f"目标读者: {audience}")
+    print("补充要求:")
+    if planning_notes.strip():
+        print(planning_notes)
+    else:
+        print("(无)")
+    print("===============================\n")
+
+
+def _confirm_generation_brief(
+    topic: str, audience: str, planning_notes: str = ""
+) -> Tuple[bool, bool, str, str, str]:
+    changed = False
+
+    while True:
+        _print_generation_brief(topic, audience, planning_notes)
+        print("开始生成目录前，请先确认需求：")
+        print("  [a] 认可当前需求，开始生成目录")
+        print("  [t] 修改主题")
+        print("  [u] 修改目标读者")
+        print("  [n] 添加补充要求")
+        print("  [c] 清空补充要求")
+        print("  [q] 退出")
+
+        choice = input("请选择操作（默认 a）: ").strip().lower()
+
+        if choice in ("", "a", "accept"):
+            return True, changed, topic, audience, planning_notes
+
+        if choice in ("t", "topic"):
+            new_topic = input("请输入新的主题: ").strip()
+            if new_topic:
+                topic = new_topic
+                changed = True
+            else:
+                print("主题不能为空，已保留原主题。\n")
+            continue
+
+        if choice in ("u", "audience"):
+            new_audience = input("请输入新的目标读者: ").strip()
+            if new_audience:
+                audience = new_audience
+                changed = True
+            else:
+                print("目标读者不能为空，已保留原值。\n")
+            continue
+
+        if choice in ("n", "note", "notes"):
+            note = input("请输入补充要求（将追加）: ").strip()
+            if not note:
+                print("补充要求为空，未追加。\n")
+                continue
+            planning_notes = (
+                f"{planning_notes}\n{note}".strip() if planning_notes else note
+            )
+            changed = True
+            continue
+
+        if choice in ("c", "clear"):
+            if planning_notes:
+                planning_notes = ""
+                changed = True
+                print("补充要求已清空。\n")
+            else:
+                print("当前没有补充要求。\n")
+            continue
+
+        if choice in ("q", "quit", "exit"):
+            return False, False, topic, audience, planning_notes
+
+        print("输入无效，请输入 a / t / u / n / c / q。\n")
+
+
+async def improve_toc_with_feedback(
+    toc: Dict, topic: str, audience: str, feedback: str, planning_notes: str = ""
+) -> Dict:
+    notes_text = f"\n补充要求：{planning_notes}" if planning_notes.strip() else ""
+    improve_prompt = (
+        "下面是当前教程目录（JSON）和用户反馈。"
+        "请基于用户反馈修改目录，并返回严格 JSON。"
+        "禁止返回额外说明文本。"
+        f"\n主题：{topic}"
+        f"\n目标读者：{audience}"
+        f"{notes_text}"
+        f"\n用户反馈：{feedback}"
+        f"\n当前目录：{json.dumps(toc, ensure_ascii=False)}"
+    )
+    improved = await toc_agent.run(task=improve_prompt)
+    raw = _extract_text_from_task_result(improved)
+
+    normalized = await json_format_agent.run(task=raw)
+    normalized_raw = _extract_text_from_task_result(normalized)
+    try:
+        new_toc = json.loads(normalized_raw)
+    except Exception as e:
+        raise ValueError(f"解析修改后 TOC JSON 失败: {e}\n原始返回:\n{normalized_raw}")
+
+    _validate_toc_structure(new_toc)
+    return new_toc
+
+
+async def generate_initial_toc(
+    topic: str,
+    audience: str,
+    max_iter=MAX_TOC_ITER,
+    force_regenerate: bool = False,
+    save: bool = True,
+    planning_notes: str = "",
+) -> Dict:
     # Check if TOC already exists
-    toc_filename = f"00_toc_{slugify(topic)}.json"
-    toc_path = OUT_DIR / toc_filename
+    toc_path = _toc_path_for_topic(topic)
     print(f"TOC path: {toc_path}")
-    if toc_path.exists():
+    if toc_path.exists() and not force_regenerate:
         print(f"Loading existing TOC from {toc_path}")
-        with open(toc_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
-    prompt = f"请为主题 `{topic}`（面向 `{audience}`）生成整篇教程目录，注意分章节并列出小节。"
+        with open(toc_path, "r", encoding="utf-8") as f:
+            toc = json.load(f)
+        _validate_toc_structure(toc)
+        return toc
+
+    notes_text = f"\n补充要求：{planning_notes}" if planning_notes.strip() else ""
+    prompt = (
+        f"请为主题 `{topic}`（面向 `{audience}`）生成整篇教程目录，注意分章节并列出小节。"
+        f"{notes_text}"
+    )
     result = await toc_agent.run(task=prompt)
     raw = _extract_text_from_task_result(result)
 
     # reviewer 迭代改进（异步顺序进行）
     for i in range(max_iter):
-        review_input = json.dumps({"type":"toc", "toc": raw, "audience": audience, "topic": (topic if i==0 else "同上次")}, ensure_ascii=False)
+        review_input = json.dumps(
+            {
+                "type": "toc",
+                "toc": raw,
+                "audience": audience,
+                "topic": (topic if i == 0 else "同上次"),
+                "planning_notes": planning_notes,
+            },
+            ensure_ascii=False,
+        )
         r = await toc_reviewer_agent.run(task=review_input)
         raw_r = _extract_text_from_task_result(r)
-        improve_prompt = "请根据以下建议，返回最终 TOC（JSON）:\n" + json.dumps(raw_r, ensure_ascii=False)
+        improve_prompt = "请根据以下建议，返回最终 TOC（JSON）:\n" + json.dumps(
+            raw_r, ensure_ascii=False
+        )
         improved = await toc_agent.run(task=improve_prompt)
         raw = _extract_text_from_task_result(improved)
-    
-    improved = await json_format_agent.run(task=raw)
-    try:
-        toc = json.loads(_extract_text_from_task_result(improved))
-    except Exception as e:
-        raise ValueError(f"解析 TOC JSON 失败: {e}\n原始返回:\n{improved}")
 
-    # Save TOC to file
-    with open(toc_path, 'w', encoding='utf-8') as f:
-        json.dump(toc, f, ensure_ascii=False, indent=2)
-    print(f"TOC saved to {toc_path}")
+    improved = await json_format_agent.run(task=raw)
+    normalized_raw = _extract_text_from_task_result(improved)
+    try:
+        toc = json.loads(normalized_raw)
+    except Exception as e:
+        raise ValueError(f"解析 TOC JSON 失败: {e}\n原始返回:\n{normalized_raw}")
+
+    _validate_toc_structure(toc)
+
+    if save:
+        _save_toc_to_file(toc, topic)
 
     return toc
 
 
-async def generate_and_improve_section(chapter_idx: int, chapter_title: str, section_title: str, audience: str, topic: str, toc: Dict, max_iter=MAX_SECTION_ITER) -> str:
+async def generate_and_improve_section(
+    chapter_idx: int,
+    chapter_title: str,
+    section_title: str,
+    audience: str,
+    topic: str,
+    toc: Dict,
+    max_iter=MAX_SECTION_ITER,
+    planning_notes: str = "",
+) -> str:
+    print(f"Generating section {chapter_idx}.{section_title}")
     # Check if section file already exists
-    existing_files = list((OUT_DIR / f"{chapter_idx:02d}_{slugify(chapter_title)}").glob(f"*_{slugify(chapter_title)}_{slugify(section_title)}.md"))
-    
+    existing_files = list(
+        (OUT_DIR / f"{chapter_idx:02d}_{slugify(chapter_title)}").glob(
+            f"*_{slugify(chapter_title)}_{slugify(section_title)}.md"
+        )
+    )
+
     if existing_files:
         print(f"Loading existing section from {existing_files[0]}")
-        with open(existing_files[0], 'r', encoding='utf-8') as f:
+        with open(existing_files[0], "r", encoding="utf-8") as f:
             content = f.read()
             # Extract only the content part (after the title and section headers)
-            lines = content.split('\n')
+            lines = content.split("\n")
             content_start = 0
             for i, line in enumerate(lines):
-                if line.startswith('# ') or line.startswith('## '):
+                if line.startswith("# ") or line.startswith("## "):
                     content_start = i + 1
                 else:
                     break
-            return '\n'.join(lines[content_start:]) if content_start < len(lines) else content
+            return (
+                "\n".join(lines[content_start:])
+                if content_start < len(lines)
+                else content
+            )
 
     # Find section description from TOC
     section_desc = ""
@@ -236,21 +451,30 @@ async def generate_and_improve_section(chapter_idx: int, chapter_title: str, sec
                     break
             break
 
-    writer_agent = AssistantAgent(name="writer_agent", system_message=writer_sys, model_client=llm_client_writer)
-    reviewer_agent = AssistantAgent(name="reviewer_agent", system_message=reviewer_sys, model_client=llm_client_viewer)
+    writer_agent = AssistantAgent(
+        name="writer_agent", system_message=writer_sys, model_client=llm_client_writer
+    )
+    reviewer_agent = AssistantAgent(
+        name="reviewer_agent",
+        system_message=reviewer_sys,
+        model_client=llm_client_viewer,
+    )
 
     # Add retry logic for initial writing
     content = None
     max_retries = 99
+    notes_text = f"；整体补充要求：{planning_notes}" if planning_notes.strip() else ""
     for attempt in range(max_retries):
         try:
-            prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。小节描述：{section_desc}"
+            prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）写正文（Markdown）。小节描述：{section_desc}{notes_text}"
             res = await writer_agent.run(task=prompt)
             content = _extract_text_from_task_result(res)
             if content:
                 break
         except Exception as e:
-            logger.error(f"Attempt {attempt+1} failed for initial writing of {chapter_title} - {section_title}: {e}")
+            logger.error(
+                f"Attempt {attempt + 1} failed for initial writing of {chapter_title} - {section_title}: {e}"
+            )
             if attempt < max_retries - 1:
                 # Exponential backoff with jitter
                 wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
@@ -258,26 +482,32 @@ async def generate_and_improve_section(chapter_idx: int, chapter_title: str, sec
             else:
                 # If all retries failed, use placeholder content
                 content = f"# {section_title}\n\n内容生成失败，请稍后重试。"
-                print(f"All attempts failed for initial writing of {chapter_title} - {section_title}")
+                print(
+                    f"All attempts failed for initial writing of {chapter_title} - {section_title}"
+                )
 
     if not content:
         content = f"# {section_title}\n\n内容生成失败，请稍后重试。"
 
     for i in range(max_iter):
-        review_input = json.dumps({
-            "type": "content", 
-            "toc": toc, 
-            "topic": topic if i==0 else "同上次",
-            "chapter": chapter_title, 
-            "section": section_title, 
-            "section_desc": section_desc, 
-            "content": content, 
-            "audience": audience
-        }, ensure_ascii=False)
-        
+        review_input = json.dumps(
+            {
+                "type": "content",
+                "toc": toc,
+                "topic": topic if i == 0 else "同上次",
+                "chapter": chapter_title,
+                "section": section_title,
+                "section_desc": section_desc,
+                "content": content,
+                "audience": audience,
+                "planning_notes": planning_notes,
+            },
+            ensure_ascii=False,
+        )
+
         # Add retry logic for review
         rv = None
-        robj = None
+        raw_r = ""
         for attempt in range(max_retries):
             try:
                 rv = await reviewer_agent.run(task=review_input)
@@ -285,16 +515,18 @@ async def generate_and_improve_section(chapter_idx: int, chapter_title: str, sec
                 if rv:
                     break
             except Exception as e:
-                print(f"Attempt {attempt+1} failed for review of {chapter_title} - {section_title}: {e}")
+                print(
+                    f"Attempt {attempt + 1} failed for review of {chapter_title} - {section_title}: {e}"
+                )
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
                     wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
-        
+
         if not rv:
             break  # Skip improvement if review failed
         # 修改: 在improve阶段也加入section_desc
-        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}\n建议：{raw_r}"
+        improve_prompt = f"当前写作主题：主题 `{topic}`， 写作整体目录：目录 `{toc}`， 现在请根据以下建议为小节 `{section_title}`（所属章节：{chapter_title}）（面向 `{audience}`）改进正文（Markdown）。小节描述：{section_desc}{notes_text}\n建议：{raw_r}"
         improvement_success = False
         for attempt in range(max_retries):
             try:
@@ -303,38 +535,123 @@ async def generate_and_improve_section(chapter_idx: int, chapter_title: str, sec
                 improvement_success = True
                 break
             except Exception as e:
-                logger.error(f"Attempt {attempt+1} failed for improvement of {chapter_title} - {section_title}: {e}")
+                logger.error(
+                    f"Attempt {attempt + 1} failed for improvement of {chapter_title} - {section_title}: {e}"
+                )
                 if attempt < max_retries - 1:
                     # Exponential backoff with jitter
                     wait_time = (120 ** (attempt + 1)) + random.uniform(0, 1)
                     await asyncio.sleep(wait_time)
-        
+
         if not improvement_success:
             # If improvement failed, keep the previous content
-            logger.error(f"All attempts failed for improvement of {chapter_title} - {section_title}, keeping previous content")
-            
+            logger.error(
+                f"All attempts failed for improvement of {chapter_title} - {section_title}, keeping previous content"
+            )
+
     return content
 
 
-async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCURRENCY) -> List[str]:
-    toc = await generate_initial_toc(topic, audience)
-    print(json.dumps(toc, ensure_ascii=False, indent=2))
+async def run_pipeline_v0_4(
+    topic: str,
+    audience: str,
+    concurrency: int = CONCURRENCY,
+    planning_notes: str = "",
+) -> List[str]:
+    accepted, force_regenerate, topic, audience, planning_notes = (
+        _confirm_generation_brief(topic, audience, planning_notes)
+    )
+    if not accepted:
+        print("已退出，未开始生成目录和章节内容。")
+        await llm_client_writer.close()
+        await llm_client_viewer.close()
+        return []
+
+    toc = await generate_initial_toc(
+        topic,
+        audience,
+        max_iter=MAX_TOC_ITER,
+        force_regenerate=force_regenerate,
+        save=False,
+        planning_notes=planning_notes,
+    )
+
+    while True:
+        _print_toc(toc)
+        print("目录确认选项：")
+        print("  [a] 接受目录并继续写作")
+        print("  [m] 提意见并修改目录")
+        print("  [r] 丢弃并重新生成目录")
+        print("  [q] 退出")
+        choice = input("请选择操作（默认 a）: ").strip().lower()
+
+        if choice in ("", "a", "accept"):
+            _save_toc_to_file(toc, topic)
+            print("目录已确认，开始生成正文...\n")
+            break
+
+        if choice in ("m", "modify", "edit"):
+            feedback = input("请输入你对目录的修改意见: ").strip()
+            if not feedback:
+                print("修改意见不能为空，请重新输入。\n")
+                continue
+            try:
+                toc = await improve_toc_with_feedback(
+                    toc, topic, audience, feedback, planning_notes=planning_notes
+                )
+                print("目录已根据你的反馈更新。\n")
+            except Exception as e:
+                print(f"根据反馈修改目录失败: {e}\n")
+            continue
+
+        if choice in ("r", "regenerate", "regen"):
+            print("正在丢弃当前目录并重新生成...\n")
+            try:
+                toc = await generate_initial_toc(
+                    topic,
+                    audience,
+                    max_iter=MAX_TOC_ITER,
+                    force_regenerate=True,
+                    save=False,
+                    planning_notes=planning_notes,
+                )
+                print("目录已重新生成。\n")
+            except Exception as e:
+                print(f"重生成目录失败: {e}\n")
+            continue
+
+        if choice in ("q", "quit", "exit"):
+            print("已退出，未开始生成章节内容。")
+            await llm_client_writer.close()
+            await llm_client_viewer.close()
+            return []
+
+        print("输入无效，请输入 a / m / r / q。\n")
+
     chapters = toc.get("chapters", [])
-    input("请按回车键继续...")
-    
+
     # 构建所有待写小节的任务元数据
-    tasks_meta: List[Tuple[int,int,str,str]] = []
+    tasks_meta: List[Tuple[int, int, str, str]] = []
     for ci, ch in enumerate(chapters, start=1):
         for si, sec in enumerate(ch.get("sections", []), start=1):
-            tasks_meta.append((ci, si, ch.get("title",""), sec.get("title","")))
+            tasks_meta.append((ci, si, ch.get("title", ""), sec.get("title", "")))
 
     semaphore = asyncio.Semaphore(concurrency)
     results = []
 
-    async def worker(ci:int, si:int, chapter_title:str, section_title:str):
+    async def worker(ci: int, si: int, chapter_title: str, section_title: str):
         async with semaphore:
             try:
-                md = await generate_and_improve_section(ci, chapter_title, section_title, audience, topic, toc)
+                md = await generate_and_improve_section(
+                    ci,
+                    chapter_title,
+                    section_title,
+                    audience,
+                    topic,
+                    toc,
+                    max_iter=MAX_SECTION_ITER,
+                    planning_notes=planning_notes,
+                )
                 path = save_section_md(ci, si, chapter_title, section_title, md)
                 print(f"Saved: {path}")
                 return path
@@ -354,32 +671,61 @@ async def run_pipeline_v0_4(topic: str, audience: str, concurrency: int = CONCUR
     print(f"全部任务完成，共保存 {len(results)} 个小节。")
     return results
 
+
 # ---------- CLI 入口 ----------
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
+
     p = argparse.ArgumentParser(description="AutoGen v0.4 异步并行多 agent 写作流水线")
-    p.add_argument("--topic", required=False, default="如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）", 
-                   help="Direct topic string or path to a .txt file containing the topic")
+    p.add_argument(
+        "--topic",
+        required=False,
+        default="如何用 AutoGen 搭建多智能体写作流水线（v0.4 异步版）",
+        help="Direct topic string or path to a .txt file containing the topic",
+    )
     p.add_argument("--audience", required=False, default="熟悉 Python 的工程师")
     p.add_argument("--concurrency", type=int, default=CONCURRENCY)
-    p.add_argument("--max-toc-iter", type=int, default=2, help="Maximum iterations for TOC generation")
-    p.add_argument("--max-section-iter", type=int, default=1, help="Maximum iterations for section generation")
+    p.add_argument(
+        "--max-toc-iter",
+        type=int,
+        default=2,
+        help="Maximum iterations for TOC generation",
+    )
+    p.add_argument(
+        "--max-section-iter",
+        type=int,
+        default=1,
+        help="Maximum iterations for section generation",
+    )
+    p.add_argument(
+        "--notes",
+        required=False,
+        default="",
+        help="Supplementary requirements before TOC generation",
+    )
     args = p.parse_args()
-    
+
     # Set global variables based on arguments
     MAX_TOC_ITER = args.max_toc_iter
     MAX_SECTION_ITER = args.max_section_iter
-    
+
     # Check if topic is a file path and read content if it is
     topic = args.topic
-    if topic.endswith('.txt') and os.path.isfile(topic):
-        with open(topic, 'r', encoding='utf-8') as f:
+    if topic.endswith(".txt") and os.path.isfile(topic):
+        with open(topic, "r", encoding="utf-8") as f:
             topic = f.read().strip()
         print(f"Read topic from file: {topic}")
     else:
         print(f"Using direct topic: {topic}")
 
-    asyncio.run(run_pipeline_v0_4(topic, args.audience, concurrency=args.concurrency))
+    asyncio.run(
+        run_pipeline_v0_4(
+            topic,
+            args.audience,
+            concurrency=args.concurrency,
+            planning_notes=args.notes,
+        )
+    )
 
 # # ---------- CLI 入口 ----------
 # if __name__ == '__main__':

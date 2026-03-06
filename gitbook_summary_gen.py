@@ -95,7 +95,7 @@ def generate_gitbook_files(json_path: Path):
         # 添加小节条目到SUMMARY.md
         for section_idx, section in enumerate(chapter['sections'], 1):
             section_title = section['title']
-            filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(chapter_title)}_{slugify(section_title)}.md"
+            filename = f"{chapter_idx:02d}_{section_idx:02d}_{slugify(section_title)}.md"
             summary_content += f"  * [{section_title}]({chapter_dir_name}/{filename})\n"
         
         summary_content += "\n"
