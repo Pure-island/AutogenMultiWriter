@@ -48,6 +48,11 @@ def load_env_file(env_path: pathlib.Path) -> None:
 
 load_env_file(pathlib.Path(__file__).parent / ".env")
 
+
+def _env_or_fallback(primary: str, fallback: str, default: str = "") -> str:
+    return os.environ.get(primary, "").strip() or default
+
+
 # ---------- 工具函数 ----------
 
 
@@ -83,9 +88,9 @@ def save_section_md(
 # ---------- 创建模型客户端与 agents ----------
 
 llm_client_writer = OpenAIChatCompletionClient(
-    model="deepseek-ai/DeepSeek-V3.2",
-    api_key=os.environ.get("SILICONFLOW_API_KEY", ""),
-    base_url="https://api.siliconflow.cn/v1",
+    model=_env_or_fallback("WRITER_MODEL", "", "gemini-3.1-pro-preview"),
+    api_key=os.environ.get("WRITER_API_KEY", "").strip(),
+    base_url=_env_or_fallback("WRITER_BASE_URL", "", "https://api.wow3.top/v1"),
     model_info=cast(
         Any,
         {
@@ -100,9 +105,9 @@ llm_client_writer = OpenAIChatCompletionClient(
     ),
 )
 llm_client_viewer = OpenAIChatCompletionClient(
-    model="deepseek-ai/DeepSeek-V3.2",
-    api_key=os.environ.get("SILICONFLOW_API_KEY", ""),
-    base_url="https://api.siliconflow.cn/v1",
+    model=_env_or_fallback("REVIEWER_MODEL", "", "deepseek-ai/DeepSeek-V3.2"),
+    api_key=os.environ.get("REVIEWER_API_KEY", "").strip(),
+    base_url=_env_or_fallback("REVIEWER_BASE_URL", "", "https://api.siliconflow.cn/v1"),
     model_info=cast(
         Any,
         {
